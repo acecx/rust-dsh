@@ -62,6 +62,20 @@ scripts/build-app.sh --zip    # 再产出 build/DSH.zip
 - `DSHCLIENT_HOME`：覆盖应用数据目录（默认 `~/Library/Application Support/DSH Client`）
 - `DSHCLIENT_NODE`：指定 Node 可执行文件路径（跳过自动检测/下载）
 
+## 发布（GitHub Actions）
+
+推 `v*` tag 会自动构建并发布 GitHub Release（见 `.github/workflows/release.yml`）：
+
+- `macos-15` runner：原生构建 arm64 + 交叉编译 x86_64 → lipo 合成通用二进制
+- 产出三个 zip：`DSH-arm64.zip`、`DSH-x86_64.zip`、`DSH-universal.zip`
+- 手动触发（`workflow_dispatch`）只构建上传 artifacts，不发 Release
+
+```bash
+git tag -a v0.2.0 -m "release v0.2.0" && git push origin v0.2.0
+```
+
+发布产物为 ad-hoc 签名、未公证；正式分发可在此基础上接入 Apple Developer 签名与 notarytool 公证。
+
 ## 常见问题
 
 - **强制退出后端口被占用？** 壳会记录 dsh 的 pid，下次启动时自动回收残留进程。
