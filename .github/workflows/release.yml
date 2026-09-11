@@ -1,0 +1,110 @@
+name: release
+
+# Builds the macOS app on every `v*` tag and publishes a GitHub Release.
+# `workflow_dispatch` builds + uploads artifacts without creating a release
+# (handy for verifying the build on any branch).
+#
+# Layout: one macos-15 (arm64) runner builds natively for arm64 and
+# cross-compiles x86_64 (pure-Rust tree + system frameworks, no C sources),
+# then lipo-combines both into a universal binary. Three zips are produced:
+# DSH-arm64.zip / DSH-x86_64.zip / DSH-universal.zip.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build macOS (arm64 + x86_64 + universal)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (stable + x86_64 cross target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Stamp version into Info.plist
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0-dev"
+          fi
+          echo "bundle version: $VERSION (build $GITHUB_RUN_NUMBER)"
+          plutil -replace CFBundleShortVersionString -string "$VERSION" packaging/Info.plist
+          plutil -replace CFBundleVersion -string "$GITHUB_RUN_NUMBER" packaging/Info.plist
+
+      - name: Build arm64
+        run: cargo build --release
+
+      - name: Build x86_64
+        run: cargo build --release --target x86_64-apple-darwin
+
+      - name: Assemble, sign and zip per-arch apps
+        run: |
+          set -euo pipefail
+          assemble() {
+            local bin="$1" app="$2" arch="$3"
+            mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+            cp "$bin" "$app/Contents/MacOS/dsh-client"
+            cp assets/icon.icns "$app/Contents/Resources/"
+            cp packaging/Info.plist "$app/Contents/"
+            codesign --force --deep -s - "$app"
+            codesign --verify --deep --strict "$app"
+            ditto -c -k --norsrc --keepParent "$app" "DSH-$arch.zip"
+          }
+          assemble target/release/dsh-client build/DSH-arm64.app arm64
+          assemble target/x86_64-apple-darwin/release/dsh-client build/DSH-x86_64.app x86_64
+
+      - name: Build universal binary and zip
+        run: |
+          set -euo pipefail
+          lipo -create \
+            target/release/dsh-client \
+            target/x86_64-apple-darwin/release/dsh-client \
+            -output target/universal-dsh-client
+          mkdir -p build/DSH-universal.app/Contents/MacOS build/DSH-universal.app/Contents/Resources
+          cp target/universal-dsh-client build/DSH-universal.app/Contents/MacOS/dsh-client
+          cp assets/icon.icns build/DSH-universal.app/Contents/Resources/
+          cp packaging/Info.plist build/DSH-universal.app/Contents/
+          codesign --force --deep -s - build/DSH-universal.app
+          codesign --verify --deep --strict build/DSH-universal.app
+          ditto -c -k --norsrc --keepParent build/DSH-universal.app DSH-universal.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DSH-macos-zips
+          path: DSH-*.zip
+          if-no-files-found: error
+
+  release:
+    name: publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: DSH-macos-zips
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: DSH-*.zip
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body: |
+            由 GitHub Actions 构建的 macOS 应用（ad-hoc 签名、未做 Apple 公证）：
+
+            - **DSH-arm64.zip** —— Apple Silicon（M 系列芯片）
+            - **DSH-x86_64.zip** —— Intel 芯片
+            - **DSH-universal.zip** —— 通用二进制，两种芯片通用
+
+            使用：解压后把应用拖入「应用程序」即可。首次打开若提示「无法验证开发者」，右键点击应用 →「打开」。
+            构建与使用说明见仓库 README。
