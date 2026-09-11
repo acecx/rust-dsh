@@ -1,0 +1,20 @@
+# Rust build artifacts
+/target
+
+# Local cargo home (project-local build cache)
+/.cargo
+
+# Build outputs (DSH.app / DSH.zip)
+/build
+
+# Local test data
+/test-home
+
+# macOS cruft
+.DS_Store
+
+# Logs
+*.log
+
+# Python
+__pycache__/

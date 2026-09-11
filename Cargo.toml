@@ -1,0 +1,15 @@
+[package]
+name = "dsh-client"
+version = "0.1.0"
+edition = "2024"
+description = "macOS desktop client that wraps the official @deepseek-ai/dsh (DeepSeek Harness) in a Rust shell"
+
+[dependencies]
+tao = "0.37.0"
+tray-icon = "0.24.2"
+wry = { version = "0.57.0", features = ["devtools"] }
+dirs = "6"
+
+[profile.release]
+strip = true
+lto = "thin"
